@@ -81,9 +81,6 @@ class MergeQualityCollection(EvalCaseCollection):
         self.user_prompt_template = user_prompt_template
         self.system_prompt = system_prompt
 
-    # ------------------------------------------------------------------
-    # Prompt construction helpers
-    # ------------------------------------------------------------------
     @staticmethod
     def _format_provided_identifiers(provided_identifiers: dict[str, Any]) -> str:
         return json.dumps(provided_identifiers, ensure_ascii=False, indent=2)
@@ -111,9 +108,6 @@ class MergeQualityCollection(EvalCaseCollection):
             chunks=self._format_chunks(example.chunks),
         )
 
-    # ------------------------------------------------------------------
-    # EvalCaseCollection contract
-    # ------------------------------------------------------------------
     def _load(self) -> CollectionInfo:
         raw_lines = self.jsonl_path.read_text(encoding="utf-8").splitlines()
         non_empty_lines = [line for line in raw_lines if line.strip()]
