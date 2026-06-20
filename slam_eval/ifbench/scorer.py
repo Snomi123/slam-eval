@@ -4,7 +4,7 @@ import inspect
 from typing import Any, Dict, Iterable, Mapping
 
 from slam_eval.ifbench.checker_factory import IFBenchCheckerFactory
-from slam_eval.scorer import Scorer
+from slam_eval.scorer import Score, Scorer
 
 
 class IFBenchScorer(Scorer):
@@ -13,23 +13,31 @@ class IFBenchScorer(Scorer):
         self._checker_factory = checker_factory
         self._build_signature_cache: dict[type[Any], tuple[set[str], bool]] = {}
 
-    def __call__(self, y_true: Mapping[str, Any], y_pred: str) -> float:
+    def __call__(self, y_true: Mapping[str, Any], y_pred: str) -> Score:
         instruction_ids: Iterable[str] = y_true["instruction_id_list"]
         kwargs_list: Iterable[Dict[str, Any]] = y_true["kwargs"]
 
-        results = []
+        sub_scores: dict[str, float] = {}
+        results: list[float] = []
+
         for instruction_id, raw_kwargs in zip(
             instruction_ids, kwargs_list, strict=True
         ):
             checker = self._checker_factory(instruction_id)
             build_kwargs = self._prepare_build_description_kwargs(checker, raw_kwargs)
             checker.build_description(**build_kwargs)
-            results.append(bool(checker.check_following(y_pred)))
+
+            checker_result = float(int(bool(checker.check_following(y_pred))))
+            sub_scores[instruction_id] = checker_result
+            results.append(checker_result)
 
         if not results:
-            return 0.0
+            return Score(primary=0.0, sub_scores={})
 
-        return sum(results) / len(results)
+        return Score(
+            primary=sum(results) / len(results),
+            sub_scores=sub_scores,
+        )
 
     def _prepare_build_description_kwargs(
         self,
@@ -61,8 +69,12 @@ class IFBenchScorer(Scorer):
             for param in signature.parameters.values()
             if param.name != "self"
             and param.kind
-            in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+            in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
         }
+
         accepts_kwargs = any(
             param.kind == inspect.Parameter.VAR_KEYWORD
             for param in signature.parameters.values()

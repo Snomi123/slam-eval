@@ -3,9 +3,16 @@ from __future__ import annotations
 import json
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from slam_eval.utils.typing import HasStr
+
+
+@dataclass(frozen=True)
+class Score:
+    primary: float
+    sub_scores: dict[str, float] | None = None
 
 
 class Scorer(ABC):
@@ -13,7 +20,7 @@ class Scorer(ABC):
         self.name = name
 
     @abstractmethod
-    def __call__(self, y_true: Any, y_pred: Any) -> int | float: ...
+    def __call__(self, y_true: Any, y_pred: Any) -> Score: ...
 
 
 class ExactMatch(Scorer):
@@ -30,19 +37,39 @@ class ExactMatch(Scorer):
             return value
         return self.preprocessing_func(value)
 
-    def __call__(self, y_true: Any, y_pred: Any) -> int | float:
+    def __call__(self, y_true: Any, y_pred: Any) -> Score:
         processed_true = self._preprocess(y_true)
         processed_pred = self._preprocess(y_pred)
-        return int(processed_true == processed_pred)
+        return Score(
+            primary=float(int(processed_true == processed_pred)), sub_scores=None
+        )
 
 
 def json_string_to_dict(value: Any) -> Any:
     if isinstance(value, (dict, list)):
         return value
     if isinstance(value, str):
+        clean_value = value.strip()
+        if clean_value.startswith("```json"):
+            clean_value = clean_value[7:]
+        elif clean_value.startswith("```"):
+            clean_value = clean_value[3:]
+        if clean_value.endswith("```"):
+            clean_value = clean_value[:-3]
+        clean_value = clean_value.strip()
+
         try:
-            return json.loads(value)
+            return json.loads(clean_value)
         except json.JSONDecodeError:
+            # Fallback to extract first `{...}` or `[...]` block via regex
+            import re
+
+            match = re.search(r"(\{.*\}|\[.*\])", clean_value, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(1))
+                except json.JSONDecodeError:
+                    pass
             return value
     return value
 
@@ -52,22 +79,21 @@ def build_json_string_to_dict() -> Callable[[Any], Any]:
 
 
 class IgnoreAllWhitespaces(Scorer):
-    def __call__(self, y_true: HasStr, y_pred: HasStr) -> int | float:
-        # Convert both inputs to strings
+    def __call__(self, y_true: HasStr, y_pred: HasStr) -> Score:
         y_true_str = str(y_true)
         y_pred_str = str(y_pred)
 
-        # Create regex pattern from y_true that allows whitespace between characters
         escaped_chars = [re.escape(char) for char in y_true_str if not char.isspace()]
         if not escaped_chars:
-            # y_true is whitespace-only, so y_pred must also be whitespace-only
-            contains_non_whitespace = any(
-                char for char in y_pred_str if not char.isspace()
+            contains_non_whitespace = any(not char.isspace() for char in y_pred_str)
+            return Score(
+                primary=float(int(not contains_non_whitespace)), sub_scores=None
             )
-            return int(not contains_non_whitespace)
 
         pattern = r"\s*".join(escaped_chars)
         pattern = rf"^\s*{pattern}\s*$"
 
-        # Check if y_pred matches this pattern
-        return int(bool(re.match(pattern, y_pred_str)))
+        return Score(
+            primary=float(int(bool(re.match(pattern, y_pred_str)))),
+            sub_scores=None,
+        )

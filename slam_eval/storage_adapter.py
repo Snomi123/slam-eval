@@ -6,6 +6,7 @@ from typing import Any
 
 from slam_eval.collections.base import EvalCaseCollection
 from slam_eval.model import Model
+from slam_eval.scorer import Score
 from slam_eval.utils.typing import HasStr
 
 
@@ -18,7 +19,7 @@ class EvalStorageAdapter(ABC):
         group_id: str,
         model: Model,
         eval_case_collection: EvalCaseCollection,
-        scores: list[int | float],
+        scores: list[Score],
         model_answers: list[HasStr],
         **other_results,
     ) -> None:
@@ -27,12 +28,14 @@ class EvalStorageAdapter(ABC):
             f"eval:{group_id}:{datetime_now.isoformat('_')}_M_"
             f"{model.name}_C_{eval_case_collection.name}"
         )
+
         result_dict = {
             "group_id": group_id,
             "timestamp": datetime_now.timestamp(),
             "model": model.name,
             "eval_case_collection": eval_case_collection.name,
-            "scores": scores,
+            "scores": [score.primary for score in scores],
+            "sub_scores": [score.sub_scores for score in scores],
             "model_answers": model_answers,
         }
 
@@ -73,16 +76,13 @@ class LocalJsonlAdapter(EvalStorageAdapter):
                             ):
                                 results.append(result_dict)
                         except json.JSONDecodeError:
-                            # Skip malformed JSON lines
                             continue
         except FileNotFoundError:
-            # Return empty list if file doesn't exist
             pass
 
         return results
 
     def _save_result_dict(self, result_id: str, result_dict: dict[str, Any]) -> None:
-        # Add the ID back to the dict for JSONL format
         result_dict_with_id = {"id": result_id, **result_dict}
         with open(self.path_to_jsonl, "a", encoding="utf-8") as f:
             f.write(json.dumps(result_dict_with_id) + "\n")
